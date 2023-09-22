@@ -1,5 +1,5 @@
-#ifndef I02_HH
-#define I02_HH
+#ifndef MO2_HH
+#define MO2_HH
 #include <array>
 #include <cstddef>
 #include <ios>
@@ -9,11 +9,11 @@
 
 #define DEBUG
 
-#define i02DEBUG(name, ident)                                                  \
+#define MO2DEBUG(name, ident)                                                  \
   std::cout << std::hex << " \033[33m" << #name << "\033[0m: " << #ident       \
             << " = \033[32m" << static_cast<size_t>(ident) << "\033[0m \n";
 
-namespace i02 {
+namespace MO2 {
 
 static constexpr size_t MEMSIZE = 64 * 1024;
 // clang-format off
@@ -104,8 +104,8 @@ enum isa: uint8_t {
 // clang-format on
 
 using inst_type = std::vector<uint8_t>;
-struct i02 {
-  i02() {
+struct MO2 {
+  MO2() {
     memory = std::array<uint8_t, MEMSIZE>{0};
     accumulator = 0;
     X = 0;
@@ -113,16 +113,16 @@ struct i02 {
     programCounter = 0;
   }
 
-  i02(const std::array<uint8_t, MEMSIZE> &mem)
+  MO2(const std::array<uint8_t, MEMSIZE> &mem)
       : memory(mem), programCounter(0) {}
 
   void reset() {
     memory = std::array<uint8_t, MEMSIZE>{0};
     programCounter = 0;
     instructionCounter = 0;
-    Break = 0;
-    Zero = 0;
-    Negative = 0;
+    flags.Break = 0;
+    flags.Zero = 0;
+    flags.Negative = 0;
     accumulator = 0;
     X = 0;
     Y = 0;
@@ -136,33 +136,42 @@ struct i02 {
     return (second << 8) | first;
   }
 
-  uint8_t getByte(size_t addr) { return memory[addr]; }
-
-  uint16_t getWord(size_t addr) { return 5; }
-
   // utility
   void setZeroNegative(uint8_t _byte) {
-    Zero = _byte == 0;
-    Negative = (_byte & 0b1000000) > 0;
+    flags.Zero = _byte == 0;
+    flags.Negative = (_byte & 0b1000000) > 0;
   }
 
   // Load instructions
   void perLdaImm() {
     accumulator = fetchByte();
-    i02DEBUG(LDA IMM, accumulator)
+    MO2DEBUG(LDA IMM, accumulator)
   }
-  void perLdaZeroPage() {
-    accumulator = memory[static_cast<size_t>(fetchByte())];
-  }
+
+  // load instructions
+  void perLdaZeroPage() { accumulator = memory[fetchByte()]; }
+  void perLdaZeroPageX() { accumulator = memory[fetchByte() + X]; }
+  void perLdaAbs() { accumulator = memory[fetchWord()]; }
+  void perLdaAbsX() { accumulator = memory[fetchWord() + X]; }
+  void perLdaAbsY() { accumulator = memory[fetchWord() + Y]; }
+  void perLdaIndiX() { accumulator = memory[memory[fetchWord() + X]]; }
+  void perLdaIndiY() { accumulator = memory[memory[fetchWord()] + Y]; }
+
   void perLdxImm() { X = fetchByte(); }
-  void perLdxZeroPage() { X = memory[static_cast<size_t>(fetchByte())]; }
-  void perLdyImm() { Y = fetchByte(); }
-  void perLdyZeroPage() { Y = memory[static_cast<size_t>(fetchByte())]; }
+  void perLdxZeroPage() { X = memory[fetchByte()]; }
+  void perLdxZeroPageY() { X = memory[fetchByte() + Y]; }
+  void perLdxAbs() { X = memory[fetchWord()]; }
+  void perLdxAbsY() { X = memory[fetchWord() + Y]; }
+
+  void perLdyImm() { X = fetchByte(); }
+  void perLdyZeroPage() { X = memory[fetchByte()]; }
+  void perLdyZeroPageY() { X = memory[fetchByte() + Y]; }
+  void perLdyAbs() { X = memory[fetchWord()]; }
+  void perLdyAbsY() { X = memory[fetchWord() + Y]; }
 
   // Store instructions
-  void perStaZeroPage() {
-    memory[static_cast<size_t>(fetchByte())] = accumulator;
-  }
+  void perStaZeroPage() { memory[fetchByte()] = accumulator; }
+  void perStaZeroPageX() { memory[fetchByte() + X] = accumulator; }
   void perStaAbs() { memory[fetchWord()] = accumulator; }
   void perStaAbsX() { memory[fetchWord() + X] = accumulator; }
   void perStaAbsY() { memory[fetchWord() + Y] = accumulator; }
@@ -184,8 +193,8 @@ struct i02 {
     uint8_t operand = exp;                                                     \
     uint8_t value = reg;                                                       \
     uint8_t p = value - operand;                                               \
-    Zero = p == 0;                                                             \
-    Carry = value >= p;                                                        \
+    flags.Zero = p == 0;                                                       \
+    flags.Carry = value >= p;                                                  \
   }
 
   // clang-format off
@@ -205,26 +214,26 @@ struct i02 {
   _HandleCpFunc(CpyZeroPage, Y, memory[fetchByte()])
   _HandleCpFunc(CpyAbs, Y, memory[fetchWord()])
 
-  
-  // clang-format off
-  
   void perBitZeroPage() {
     uint8_t temp = accumulator & memory[fetchByte()];
     setZeroNegative(temp);
   }
-
-
+  void perBitAbs() {
+    uint8_t temp = accumulator & memory[fetchWord()];
+    setZeroNegative(temp);
+  }
+  // clang-format on
 
   // flags instructions
-  void perClc() { Carry = 0b0; }
-  void perSec() { Carry = 0b1; }
-  void perClv() { Overflow = 0b0; }
-  void perCli() { Mask = 0b0; }
-  void perSei() { Mask = 0b1; }
-  void perCld() { Decimal = 0b0; }
-  void perSed() { Decimal = 0b1; }
+  void perClc() { flags.Carry = 0b0; }
+  void perSec() { flags.Carry = 0b1; }
+  void perClv() { flags.Overflow = 0b0; }
+  void perCli() { flags.Mask = 0b0; }
+  void perSei() { flags.Mask = 0b1; }
+  void perCld() { flags.Decimal = 0b0; }
+  void perSed() { flags.Decimal = 0b1; }
   void perBrk() {
-    Break = 0b1;
+    flags.Break = 0b1;
     instructionCounter = 0;
   }
 
@@ -235,17 +244,17 @@ struct i02 {
   void perTya() { accumulator = Y; }
   void perDex() {
     X -= 1;
-    i02DEBUG(DEX, X)
+    MO2DEBUG(DEX, X)
   } // no points in dex
   void perDey() { Y = Y - 1; }
   void perInx() {
     X = X + 1;
-    i02DEBUG(INX, X)
+    MO2DEBUG(INX, X)
   }
   void perIny() { Y = Y + 1; }
+
   void perIncZeroPage() { ++memory[fetchByte()]; }
   void perIncZeroPageX() { ++memory[fetchByte() + X]; }
-
   void perIncAbs() { ++memory[fetchWord()]; }
   void perIncAbsX() { ++memory[fetchWord() + X]; }
 
@@ -255,134 +264,169 @@ struct i02 {
   void perDecAbsX() { ++memory[fetchWord() + X]; }
 
   void perAdc() {
-    accumulator += memory[fetchByte()] + Carry;
-    setZeroNegative(accumulator);
+    uint8_t addr = fetchByte();
+    uint16_t temp = memory[addr] + accumulator + flags.Carry;
+    flags.Carry = temp > 0xff;
+    flags.Overflow = (memory[addr] & 0x80) != (temp & 0x80);
+    setZeroNegative(temp);
+    accumulator = temp & 0xff; // ensure the value fits 8 bits
   }
   void perSbc() {
-    accumulator =
-        accumulator - memory[static_cast<size_t>(fetchByte())] - Carry;
+    uint8_t addr = fetchByte();
+    uint16_t temp = memory[addr] - accumulator - flags.Carry;
+    flags.Carry = temp > 0xff;
+    flags.Overflow = (memory[addr] & 0x80) != (temp & 0x80);
+    accumulator = temp & 0xff;
   }
 
   // bitwise
   void perAndImm() {
-    accumulator = accumulator & fetchByte();
+    accumulator &= fetchByte();
     setZeroNegative(accumulator);
   }
   void perAndZeroPage() {
-    accumulator = accumulator & memory[static_cast<size_t>(fetchByte())];
+    accumulator &= memory[fetchByte()];
     setZeroNegative(accumulator);
   }
   void perAndZeroPageX() {
-    accumulator =
-        accumulator & memory[static_cast<size_t>(fetchByte() + fetchByte())];
+    accumulator &= memory[fetchByte() + fetchByte()];
     setZeroNegative(accumulator);
   }
   void perAndAbs() {
-    accumulator = accumulator & memory[static_cast<size_t>(fetchWord())];
+    accumulator &= memory[fetchWord()];
     setZeroNegative(accumulator);
   }
   void perAndAbsX() {
-    accumulator = accumulator & memory[static_cast<size_t>(fetchWord()) +
-                                       static_cast<size_t>(fetchByte())];
+    accumulator &= memory[fetchWord() + fetchByte()];
     setZeroNegative(accumulator);
   }
   void perAslacc() {
-    accumulator = accumulator * 2;
-    Carry = ((accumulator >> 7) & 1);
+    accumulator <<= 1;
+    flags.Carry = ((accumulator >> 7) & 1);
     setZeroNegative(accumulator);
-    i02DEBUG(ASL, accumulator) i02DEBUG(ASL, Carry)
+    MO2DEBUG(ASL, accumulator) MO2DEBUG(ASL, flags.Carry)
   }
   void perAslZeroPage() {
-    accumulator = accumulator << memory[static_cast<size_t>(fetchByte())];
-    Carry = Carry << ((accumulator >> 7) & 1);
+    accumulator <<= memory[fetchByte()];
+    flags.Carry = ((accumulator >> 7) & 1);
     setZeroNegative(accumulator);
   }
   void perAslZeroPageX() {
-    accumulator = accumulator
-                  << memory[static_cast<size_t>(fetchByte() + fetchByte())];
+    accumulator <<= memory[fetchByte() + X];
     setZeroNegative(accumulator);
   }
   void perAslAbs() {
-    accumulator = accumulator << memory[static_cast<size_t>(fetchWord())];
+    accumulator <<= memory[fetchWord()];
     setZeroNegative(accumulator);
   }
   void perAslAbsX() {
-    accumulator = accumulator << memory[static_cast<size_t>(fetchWord()) +
-                                        static_cast<size_t>(fetchByte())];
+    accumulator <<= memory[fetchWord() + X];
     setZeroNegative(accumulator);
   }
 
   // branching
   void perBne() {
 #ifdef DEBUG
-    i02DEBUG(BNE, Zero)
+    MO2DEBUG(BNE, flags.Zero)
 #endif
-        if (!Zero) {
+    if (!flags.Zero) {
       programCounter = static_cast<size_t>(fetchByte());
-      i02DEBUG(BNE, programCounter)
+      MO2DEBUG(BNE, programCounter)
     }
   }
   void perBeq() {
 #ifdef DEBUG
-    i02DEBUG(BEQ, Zero)
+    MO2DEBUG(BEQ, flags.Zero)
 #endif
-        if (Zero) {
+    if (flags.Zero) {
       programCounter = static_cast<size_t>(fetchByte());
     }
   }
   void perBcc() {
 #ifdef DEBUG
-    i02DEBUG(BCC, Carry)
+    MO2DEBUG(BCC, flags.Carry)
 #endif
-        if (!Carry) programCounter = static_cast<size_t>(fetchByte());
+    if (!flags.Carry)
+      programCounter = static_cast<size_t>(fetchByte());
   }
   void perBcs() {
 #ifdef DEBUG
-    i02DEBUG(BCS, Carry)
+    MO2DEBUG(BCS, flags.Carry)
 #endif
-        if (Carry) {
+    if (flags.Carry) {
       programCounter = static_cast<size_t>(fetchByte());
-      i02DEBUG(BCS, programCounter) i02DEBUG(BCS, memory[programCounter])
+      MO2DEBUG(BCS, programCounter) MO2DEBUG(BCS, memory[programCounter])
     }
   }
   void perBvc() {
 #ifdef DEBUG
-    i02DEBUG(BVC, Overflow)
+    MO2DEBUG(BVC, flags.Overflow)
 #endif
-        if (!Overflow) programCounter = static_cast<size_t>(fetchByte());
+    if (!flags.Overflow)
+      programCounter = static_cast<size_t>(fetchByte());
   }
   void perBvs() {
 #ifdef DEBUG
-    i02DEBUG(BVS, Overflow)
+    MO2DEBUG(BVS, flags.Overflow)
 #endif
-        if (Overflow) programCounter = static_cast<size_t>(fetchByte());
+    if (flags.Overflow)
+      programCounter = static_cast<size_t>(fetchByte());
   }
   void perBpl() {
 #ifdef DEBUG
-    i02DEBUG(BPL, Negative)
+    MO2DEBUG(BPL, flags.Negative)
 #endif
-        if (!Negative) programCounter = static_cast<size_t>(fetchByte());
+    if (!flags.Negative)
+      programCounter = static_cast<size_t>(fetchByte());
   }
   void perBmi() {
 #ifdef DEBUG
-    i02DEBUG(BMI, Negative)
+    MO2DEBUG(BMI, flags.Negative)
 #endif
-        if (Negative) programCounter = static_cast<size_t>(fetchByte());
+    if (flags.Negative)
+      programCounter = static_cast<size_t>(fetchByte());
   }
 
   void perJmpAbs() {
     programCounter = fetchWord();
 #ifdef DEBUG
-    i02DEBUG(JMP, programCounter)
+    MO2DEBUG(JMP, programCounter)
 #endif
+  }
+
+  void perJsrAbs() {
+    memory[--stackPtr] = programCounter - 1;
+    programCounter = fetchWord();
+  }
+
+  void perRts() {
+    uint8_t first = memory[--stackPtr];
+    uint8_t second = memory[--stackPtr];  
+    programCounter = (first << 8) | second;
+  }
+
+  // stack operations
+  void perPha() {
+    memory[--stackPtr] = accumulator;
+    programCounter++;
+    MO2DEBUG(PHA, programCounter)
+  }
+  void perPla() {
+    stackPtr += 1;
+    accumulator = memory[stackPtr];
+    programCounter++;
+  }
+  void perPhp() {
+    memory[--stackPtr] = P;
+    programCounter++;
   }
 
   void executeInstructions() {
     auto insts = memory[programCounter];
 
     // clang-format off
-    i02DEBUG(EXEC, insts)
-    i02DEBUG(EXEC, programCounter)
+    MO2DEBUG(EXEC, insts)
+    MO2DEBUG(EXEC, programCounter)
        
 
     switch (insts) {
@@ -392,168 +436,56 @@ struct i02 {
           per##fun();                                                                \
           break;
 
+      // transfer
       _HandleCase(TAX, Tax) _HandleCase(TAY, Tay) _HandleCase(TXA, Txa) _HandleCase(TYA, Tya)
-
       _HandleCase(DEX, Dex) _HandleCase(DEY, Dey) _HandleCase(INX, Inx) _HandleCase(INY, Iny)
 
+      // memory 
       _HandleCase(LDY_IMMEDIATE, LdyImm) _HandleCase(LDY_ZERO_PAGE, LdyZeroPage) _HandleCase(LDX_IMMEDIATE, LdxImm)
+      _HandleCase(LDA_ZERO_PAGE, LdaZeroPage) _HandleCase(LDX_ZERO_PAGE, LdxZeroPage) _HandleCase(LDA_IMMEDIATE, LdaImm)
+      _HandleCase(STY_ZERO_PAGE, StyZeroPage) _HandleCase(STX_ZERO_PAGE, StxZeroPage) _HandleCase(STA_ZERO_PAGE, StaZeroPage)
 
-          // Memory Instructions
-          case LDA_ZERO_PAGE : perLdaZeroPage();
-      break;
-    case LDX_ZERO_PAGE:
-      perLdxZeroPage();
-      break;
-    case LDA_IMMEDIATE:
-      perLdaImm();
-      break;
-    case STY_ZERO_PAGE:
-      perStyZeroPage();
-      break;
-    case STX_ZERO_PAGE:
-      perStxZeroPage();
-      break;
+      _HandleCase(STA_ZERO_PAGE_X, StaZeroPageX) _HandleCase(STA_ABSOLUTE, StaAbs) _HandleCase(STA_ABSOLUTE_X, StaAbsX)
+      _HandleCase(STA_ABSOLUTE_Y, StaAbsY) _HandleCase(STA_INDIRECT_Y, StaIndiY) _HandleCase(STA_INDIRECT_X, StaIndiX)
 
-      // STA
-    case STA_ZERO_PAGE:
-      perStaZeroPage();
-      break;
-    case STA_ABSOLUTE:
-      perStaAbs();
-      break;
-    case STA_ABSOLUTE_X:
-      perStaAbsX();
-      break;
-    case STA_ABSOLUTE_Y:
-      perStaAbsY();
-      break;
-    case STA_INDIRECT_X:
-      perStaIndiX();
-      break;
-    case STA_INDIRECT_Y:
-      perStaIndiY();
-      break;
+      _HandleCase(INC_ZERO_PAGE, IncZeroPage) _HandleCase(INC_ZERO_PAGE_X, IncZeroPageX) _HandleCase(INC_ABSOLUTE, IncAbs)
+      _HandleCase(INC_ABSOLUTE_X, IncAbsX)
+      
+      _HandleCase(DEC_ZERO_PAGE, DecZeroPage) _HandleCase(DEC_ZERO_PAGE_X, DecZeroPageX) _HandleCase(DEC_ABSOLUTE, DecAbs)
+      _HandleCase(DEC_ABSOLUTE_X, DecAbsX)
+      
+      _HandleCase(BRK, Brk) _HandleCase(CLC, Clc) _HandleCase(CLI, Cli) _HandleCase(CLV, Clv)
+      
+      // bitwise
+      _HandleCase(ADC_IMMEDIATE, Adc) _HandleCase(ASL_ACCUMULATOR, Aslacc)
+      
 
-    case INC_ZERO_PAGE:
-      perIncZeroPage();
-      break;
-    case INC_ZERO_PAGE_X:
-      perIncZeroPageX();
-      break;
-    case INC_ABSOLUTE:
-      perIncAbs();
-      break;
-    case INC_ABSOLUTE_X:
-      perIncAbsX();
-      break;
+      // compare
+      _HandleCase(CMP_IMMEDIATE, CmpImm) _HandleCase(CMP_ZERO_PAGE, CmpZeroPage) _HandleCase(CMP_ZERO_PAGE_X, CmpZeroPageX)
+      _HandleCase(CMP_ABSOLUTE, CmpAbs) _HandleCase(CMP_ABSOLUTE_X, CmpAbsX) _HandleCase(CMP_ABSOLUTE_Y, CmpAbsY)
+      _HandleCase(CMP_INDIRECT_X, CmpIndiX) _HandleCase(CMP_INDIRECT_Y, CmpIndiY)
+      
+      _HandleCase(CPX_IMMEDIATE, CpxImm) _HandleCase(CPX_ZERO_PAGE, CpxZeroPage)
+      
+      _HandleCase(CPY_IMMEDIATE, CpyImm) _HandleCase(CPY_ZERO_PAGE, CpyZeroPage)
+      
+      _HandleCase(BIT_ZERO_PAGE, BitZeroPage) _HandleCase(BIT_ABSOLUTE, BitAbs)
+      
 
-    case DEC_ZERO_PAGE:
-      perDecZeroPage();
-      break;
-    case DEC_ZERO_PAGE_X:
-      perDecZeroPageX();
-      break;
-    case DEC_ABSOLUTE:
-      perDecAbs();
-      break;
-    case DEC_ABSOLUTE_X:
-      perDecAbsX();
-      break;
+      // branching
+      _HandleCase(BNE_RELATIVE, Bne) _HandleCase(BEQ_RELATIVE, Beq) _HandleCase(BPL_RELATIVE, Bpl)
+      _HandleCase(BMI_RELATIVE, Bmi) _HandleCase(JMP_ABSOLUTE, JmpAbs) _HandleCase(BCS_RELATIVE, Bcs)
 
-    // Flags Instructions
-    case BRK:
-      perBrk();
-      break;
-    case CLC:
-      perClc();
-      break;
-    case CLI:
-      perCli();
-      break;
-    case CLV:
-      perClv();
-      break;
-
-    // Math Instructions
-    case ADC_IMMEDIATE:
-      perAdc();
-      break;
-    case ASL_ACCUMULATOR:
-      perAslacc();
-      break;
-
-    // Compare Instructions
-    case CMP_IMMEDIATE:
-      perCmpImm();
-      break;
-    case CMP_ZERO_PAGE:
-      perCmpZeroPage();
-      break;
-    case CMP_ZERO_PAGE_X:
-      perCmpZeroPageX();
-      break;
-    case CMP_ABSOLUTE:
-      perCmpAbs();
-      break;
-    case CMP_ABSOLUTE_X:
-      perCmpAbsX();
-      break;
-    case CMP_ABSOLUTE_Y:
-      perCmpAbsY();
-      break;
-    case CMP_INDIRECT_X:
-      perCmpIndiX();
-      break;
-    case CMP_INDIRECT_Y:
-      perCmpIndiY();
-      break;
-
-    case CPX_IMMEDIATE:
-      perCpxImm();
-      break;
-    case CPX_ZERO_PAGE:
-      perCpxZeroPage();
-      break;
-    case CPY_IMMEDIATE:
-      perCpyImm();
-      break;
-    case CPY_ZERO_PAGE:
-      perCpyZeroPage();
-      break;
-    case BIT_ZERO_PAGE:
-      perBitZeroPage();
-      break;
-    case BIT_ABSOLUTE:
-      // perBitAbs();
-      break;
-    // Branch Instructions
-    case BNE_RELATIVE:
-      perBne();
-      break;
-    case BEQ_RELATIVE:
-      perBeq();
-      break;
-    case BPL_RELATIVE:
-      perBpl();
-      break;
-    case BMI_RELATIVE:
-      perBmi();
-      break;
-    case JMP_ABSOLUTE:
-      perJmpAbs();
-      break;
-    case BCS_RELATIVE:
-      perBcs();
-      break;
+      _HandleCase(PLA, Pla) _HandleCase(PHA, Pha) _HandleCase(PHP, Php) _HandleCase(JSR_ABSOLUTE, JsrAbs)
 
     default:
       break;
     }
-    // clang-format on
+    // 
   }
 
   void execute() {
-    while (!Break) {
+    while (!flags.Break) {
       executeInstructions();
       ++programCounter;
     }
@@ -563,7 +495,7 @@ struct i02 {
       std::cout << std::hex << static_cast<size_t>(memory[i]) << ' ';
     }
     std::cout << '\n';
-    i02DEBUG(execute, X) i02DEBUG(execute, Y) i02DEBUG(execute, accumulator)
+    MO2DEBUG(execute, X) MO2DEBUG(execute, Y) MO2DEBUG(execute, accumulator) MO2DEBUG(execute, stackPtr) MO2DEBUG(execute, programCounter)
 #endif
   }
 
@@ -579,16 +511,23 @@ struct i02 {
   uint8_t Y;
   size_t programCounter = 0;
   size_t instructionCounter = 0;
-  size_t stackPtr = 0;
+  size_t stackPtr = 0x1ff;
 
   // flags
+  struct Flags {
   uint8_t Zero : 1 = 0;
-  uint8_t Negative : 1 = 0;
-  uint8_t Break : 1 = 0;
   uint8_t Carry : 1 = 0;
-  uint8_t Overflow : 1 = 0;
-  uint8_t Decimal : 1 = 0;
   uint8_t Mask : 1 = 0;
+  uint8_t Decimal : 1 = 0;
+  uint8_t Break : 1 = 0;
+  uint8_t Unused : 1 = 0;
+  uint8_t Overflow : 1 = 0;
+  uint8_t Negative : 1 = 0;
+  };
+  union {
+    uint8_t P;
+    Flags flags;
+  };
 };
-} // namespace i02
+} // namespace MO2
 #endif
